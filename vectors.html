@@ -84,12 +84,27 @@
   const svg = document.getElementById("plot");
 
   // ---- Helpers
+  const EPS0 = 5e-10; // for snapping tiny values to 0 to avoid "-0.0"
   const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+
+  // + for positive, - for negative, blank for 0 (with snap)
   const fmtSigned = (x) => {
     if (!Number.isFinite(x)) return "—";
-    const v = Number(x);
-    return (v >= 0 ? "+" : "") + v.toFixed(1);
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    if (v === 0) return "";
+    return (v > 0 ? "+" : "") + v.toFixed(1);
   };
+
+  // Parenthesized numeric value: (Rx) or (Ry) with sign only if negative
+  // Examples: (12.3), (-12.3), (0.0)
+  const fmtSignedParen = (x) => {
+    if (!Number.isFinite(x)) return "(—)";
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    return `(${v.toFixed(1)})`;
+  };
+
   const deg2rad = (d) => d * Math.PI / 180;
   const rad2deg = (r) => r * 180 / Math.PI;
 
@@ -205,7 +220,7 @@
     svg.appendChild(el("line", { x1:0, y1:y0, x2:W, y2:y0, stroke:"#bbb", "stroke-width":"1" }));
     svg.appendChild(el("line", { x1:x0, y1:0, x2:x0, y2:H, stroke:"#bbb", "stroke-width":"1" }));
 
-    // tip-to-tail arrows (individual vectors)
+    // individual vectors (drawn tip-to-tail)
     for (let i=0; i<vectors.length; i++) {
       const p1 = pts[i], p2 = pts[i+1];
       svg.appendChild(el("line", {
@@ -245,9 +260,8 @@
     RmagEl.textContent = fmt(Rmag);
     RangEl.textContent = `${Rang.toFixed(1)}°`;
 
-    // Resultant vector form shown BELOW the plot in red
+    // ONLY change requested: bold and parentheses around Rx and Ry
     RvecBelowEl.innerHTML = `<strong>R = ${fmtSignedParen(Rx)}i + ${fmtSignedParen(Ry)}j</strong>`;
-
 
     draw(vectors);
   }
