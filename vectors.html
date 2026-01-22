@@ -87,9 +87,14 @@
   const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
   const fmtSigned = (x) => {
     if (!Number.isFinite(x)) return "—";
-    const v = Number(x);
-    return (v >= 0 ? "+" : "") + v.toFixed(1);
+    const v0 = Number(x);
+    // Snap tiny values to exactly zero to avoid "-0.0"
+    const v = Math.abs(v0) < 5e-10 ? 0 : v0;
+  
+    if (v === 0) return "0.0";              // nothing for 0 is NOT typical in tables; if you truly want blank, return ""
+    return (v > 0 ? "+" : "") + v.toFixed(1);
   };
+
   const deg2rad = (d) => d * Math.PI / 180;
   const rad2deg = (r) => r * 180 / Math.PI;
 
