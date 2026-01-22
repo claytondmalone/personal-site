@@ -1,1 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vector Resultant Visualizer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    .wrap { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: right; }
+    th { background: #f6f6f6; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    input { width: 92px; padding: 4px 6px; font-size: 13px; }
+    .btns { display: flex; gap: 8px; margin: 10px 0; }
+    button { padding: 6px 10px; font-size: 13px; cursor: pointer; }
+    .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; font-size: 13px; }
+    .card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fff; }
+    .plotCard { border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: #fff; }
+    .muted { color: #666; font-size: 12px; }
+    .kpi { font-variant-numeric: tabular-nums; }
+    .small { font-size: 12px; }
+    .rowbtn { text-align: center; }
+    .rowbtn button { padding: 2px 8px; }
+    svg { width: 100%; height: 420px; display: block; background: #ffffff; }
+  </style>
+</head>
+<body>
+  <h1>Vector Resultant Visualizer (Tip-to-Tail + Resultant)</h1>
+  <div class="muted">Enter magnitude and angle (degrees CCW from +x). Components, resultant, and arrows update automatically.</div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="btns">
+        <button id="addBtn">Add vector</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+
+      <table id="vecTable">
+        <thead>
+          <tr>
+            <th>Vector</th>
+            <th>Mag</th>
+            <th>Angle (deg)</th>
+            <th>Fx</th>
+            <th>Fy</th>
+            <th class="rowbtn">Del</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="summary">
+        <div><strong>Rx</strong> = <span class="kpi" id="Rx">—</span></div>
+        <div><strong>Ry</strong> = <span class="kpi" id="Ry">—</span></div>
+        <div><strong>|R|</strong> = <span class="kpi" id="Rmag">—</span></div>
+        <div><strong>θR</strong> = <span class="kpi" id="Rang">—</span></div>
+        <div style="grid-column: 1 / -1;" class="small">
+          <strong>Vector form:</strong>
+          <span class="kpi" id="Rvec">R = —</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="plotCard">
+      <svg id="plot" viewBox="0 0 800 520" aria-label="Vector plot"></svg>
+      <div class="muted small">
+        Gray arrows: tip-to-tail vectors. Red arrow: resultant from origin to final tip.
+      </div>
+    </div>
+  </div>
+
+<script>
+(function() {
+  const tbody = document.querySelector("#vecTable tbody");
+  const addBtn = document.getElementById("addBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const RxEl = document.getElementById("Rx");
+  const RyEl = document.getElementById("Ry");
+  const RmagEl = document.getElementById("Rmag");
+  const RangEl = document.getElementById("Rang");
+  const RvecEl = document.getElementById("Rvec");
+
+  const svg = document.getElementById("plot");
+
+  // ---- Helpers
+  const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+  const deg2rad = (d) => d * Math.PI / 180;
+  const rad2deg = (r) => r * 180 / Math.PI;
+
+  function makeRow(label, mag=100, ang=0) {
+    const tr = document.createElement("tr");
+
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = label;
+
+    const tdMag = document.createElement("td");
+    const inMag = document.createElement("input");
+    inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
+    tdMag.appendChild(inMag);
+
+    const tdAng = document.createElement("td");
+    const inAng = document.createElement("input");
+    inAng.type = "number"; inAng.step = "any"; inAng.value = ang;
+    tdAng.appendChild(inAng);
+
+    const tdFx = document.createElement("td"); tdFx.textContent = "—";
+    const tdFy = document.createElement("td"); tdFy.textContent = "—";
+
+    const tdDel = document.createElement("td");
+    tdDel.className = "rowbtn";
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    tdDel.appendChild(delBtn);
+
+    tr.append(tdLabel, tdMag, tdAng, tdFx, tdFy, tdDel);
+    tbody.appendChild(tr);
+
+    function onChange() { update(); }
+    inMag.addEventListener("input", onChange);
+    inAng.addEventListener("input", onChange);
+    delBtn.addEventListener("click", () => { tr.remove(); relabel(); update(); });
+
+    tr._mag = inMag;
+    tr._ang = inAng;
+    tr._fxCell = tdFx;
+    tr._fyCell = tdFy;
+  }
+
+  function relabel() {
+    [...tbody.querySelectorAll("tr")].forEach((tr, i) => {
+      tr.children[0].textContent = `F${i+1}`;
+    });
+  }
+
+  function getVectors() {
+    const rows = [...tbody.querySelectorAll("tr")];
+    return rows.map(tr => {
+      const mag = parseFloat(tr._mag.value);
+      const ang = parseFloat(tr._ang.value);
+      const th = deg2rad(ang);
+      const fx = mag * Math.cos(th);
+      const fy = mag * Math.sin(th);
+      return { mag, ang, fx, fy, row: tr };
+    }).filter(v => Number.isFinite(v.mag) && Number.isFinite(v.ang));
+  }
+
+  // ---- SVG drawing
+  function clearSVG() {
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+  }
+
+  function el(name, attrs={}) {
+    const e = document.createElementNS("http://www.w3.org/2000/svg", name);
+    for (const [k,v] of Object.entries(attrs)) e.setAttribute(k, v);
+    return e;
+  }
+
+  function draw(vectors) {
+    clearSVG();
+
+    // Compute tip-to-tail points
+    const pts = [{x:0, y:0}];
+    for (const v of vectors) {
+      const last = pts[pts.length-1];
+      pts.push({ x: last.x + v.fx, y: last.y + v.fy });
+    }
+    const R = pts[pts.length-1];
+
+    // Bounds + padding
+    const xs = pts.map(p=>p.x).concat([0, R.x]);
+    const ys = pts.map(p=>p.y).concat([0, R.y]);
+
+    let xmin = Math.min(...xs), xmax = Math.max(...xs);
+    let ymin = Math.min(...ys), ymax = Math.max(...ys);
+
+    // Handle near-zero ranges
+    const dx = Math.max(1e-6, xmax - xmin);
+    const dy = Math.max(1e-6, ymax - ymin);
+    const pad = 0.12 * Math.max(dx, dy);
+
+    xmin -= pad; xmax += pad; ymin -= pad; ymax += pad;
+
+    // Map data -> svg coords
+    const W = 800, H = 520;
+    const sx = (x) => (x - xmin) / (xmax - xmin) * W;
+    const sy = (y) => H - (y - ymin) / (ymax - ymin) * H;
+
+    // defs for arrowheads
+    const defs = el("defs");
+    const mkGray = el("marker", { id:"arrowGray", markerWidth:"10", markerHeight:"10", refX:"9", refY:"5", orient:"auto", markerUnits:"strokeWidth" });
+    mkGray.appendChild(el("path", { d:"M 0 0 L 10 5 L 0 10 z", fill:"#777" }));
+    const mkRed = el("marker", { id:"arrowRed", markerWidth:"12", markerHeight:"12", refX:"10", refY:"6", orient:"auto", markerUnits:"strokeWidth" });
+    mkRed.appendChild(el("path", { d:"M 0 0 L 12 6 L 0 12 z", fill:"#c40000" }));
+    defs.append(mkGray, mkRed);
+    svg.appendChild(defs);
+
+    // axes through origin
+    const x0 = sx(0), y0 = sy(0);
+    svg.appendChild(el("line", { x1:0, y1:y0, x2:W, y2:y0, stroke:"#bbb", "stroke-width":"1" }));
+    svg.appendChild(el("line", { x1:x0, y1:0, x2:x0, y2:H, stroke:"#bbb", "stroke-width":"1" }));
+
+    // tip-to-tail arrows
+    for (let i=0; i<vectors.length; i++) {
+      const p1 = pts[i], p2 = pts[i+1];
+      svg.appendChild(el("line", {
+        x1: sx(p1.x), y1: sy(p1.y),
+        x2: sx(p2.x), y2: sy(p2.y),
+        stroke:"#777", "stroke-width":"3",
+        "marker-end":"url(#arrowGray)"
+      }));
+    }
+
+    // resultant arrow
+    svg.appendChild(el("line", {
+      x1: sx(0), y1: sy(0),
+      x2: sx(R.x), y2: sy(R.y),
+      stroke:"#c40000", "stroke-width":"4",
+      "marker-end":"url(#arrowRed)"
+    }));
+
+    // label near resultant tip
+    const rx = R.x, ry = R.y;
+    const label = `R = ${rx.toFixed(1)} i ${ry < 0 ? "- " : "+ "}${Math.abs(ry).toFixed(1)} j`;
+    const tx = el("text", { x: sx(R.x) + 10, y: sy(R.y) - 10, fill:"#111", "font-size":"14" });
+    tx.textContent = label;
+    svg.appendChild(tx);
+  }
+
+  function update() {
+    const vectors = getVectors();
+
+    // Update table Fx/Fy cells
+    vectors.forEach(v => {
+      v.row._fxCell.textContent = fmt(v.fx);
+      v.row._fyCell.textContent = fmt(v.fy);
+    });
+
+    // Compute resultant
+    const Rx = vectors.reduce((a,v)=>a+v.fx, 0);
+    const Ry = vectors.reduce((a,v)=>a+v.fy, 0);
+    const Rmag = Math.hypot(Rx, Ry);
+    const Rang = (Rmag < 1e-12) ? 0 : ( (rad2deg(Math.atan2(Ry, Rx)) % 360 + 360) % 360 );
+
+    RxEl.textContent = fmt(Rx);
+    RyEl.textContent = fmt(Ry);
+    RmagEl.textContent = fmt(Rmag);
+    RangEl.textContent = `${Rang.toFixed(1)}°`;
+    RvecEl.textContent = `R = ${Rx.toFixed(1)} i ${Ry < 0 ? "- " : "+ "}${Math.abs(Ry).toFixed(1)} j`;
+
+    draw(vectors);
+  }
+
+  // ---- init
+  function reset() {
+    tbody.innerHTML = "";
+    makeRow("F1", 150, 30);
+    makeRow("F2", 80, 110);
+    makeRow("F3", 110, 270);
+    makeRow("F4", 100, -15);
+    relabel();
+    update();
+  }
+
+  addBtn.addEventListener("click", () => {
+    const n = tbody.querySelectorAll("tr").length + 1;
+    makeRow(`F${n}`, 100, 0);
+    relabel();
+    update();
+  });
+
+  resetBtn.addEventListener("click", reset);
+
+  reset();
+})();
+</script>
+</body>
+</html>
 
