@@ -165,13 +165,12 @@
       <div class="plotLegend">
         <span><span class="swatch swGray"></span> Gray: individual force vectors (from origin)</span>
         <span><span class="swatch swRed"></span> Red: resultant vector (from origin)</span>
-      
+
         <button type="button" id="viewX" style="padding:4px 8px;font-size:12px;">View +X</button>
         <button type="button" id="viewY" style="padding:4px 8px;font-size:12px;">View +Y</button>
         <button type="button" id="viewZ" style="padding:4px 8px;font-size:12px;">View +Z</button>
         <button type="button" id="viewIso" style="padding:4px 8px;font-size:12px;">Isometric</button>
 
-      
         <span class="muted">Drag to rotate • Scroll to zoom</span>
       </div>
     </div>
@@ -464,11 +463,22 @@
   try {
     // Use dynamic imports so a failure doesn't break the whole page.
     const THREE = await import("three"); // resolved by import map
-    const modControls = await import("/assets/js/three/OrbitControls.js");
-    const OrbitControls = modControls.OrbitControls;
 
+    // Prefer TrackballControls (intuitive drag at ANY angle), fall back to OrbitControls if unavailable.
+    // If you don't already have TrackballControls.js, copy it from Three.js examples to:
+    //   /assets/js/three/TrackballControls.js
+    let ControlsCtor = null;
+    let controlsKind = "TrackballControls";
+    try {
+      const modTB = await import("/assets/js/three/TrackballControls.js");
+      ControlsCtor = modTB.TrackballControls;
+    } catch (e) {
+      const modOrbit = await import("/assets/js/three/OrbitControls.js");
+      ControlsCtor = modOrbit.OrbitControls;
+      controlsKind = "OrbitControls";
+    }
 
-    setStatus("3D plot ready.");
+    setStatus(`3D plot ready (${controlsKind}).`);
 
     // --- Three.js scene setup ---
     const scene = new THREE.Scene();
@@ -480,65 +490,42 @@
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
     camera.position.set(10, 8, 10);
+    camera.up.set(0, 1, 0);
 
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;   // smaller = less floaty
-    controls.rotateSpeed = 0.7;      // smaller = less twitchy
-    controls.zoomSpeed = 0.9;
-    controls.panSpeed = 0.6;
+    const controls = new ControlsCtor(camera, renderer.domElement);
 
-    controls.target.set(0, 0, 0);
-// PASTE STARTS HERE
-const btnX  = document.getElementById("viewX");
-const btnY  = document.getElementById("viewY");
-const btnZ  = document.getElementById("viewZ");
-const btnIso = document.getElementById("viewIso");
+    // Make dragging feel stable + intuitive
+    // TrackballControls: free-rotation (no fixed world-up), which fixes the “wonky” feel at different viewpoints.
+    // OrbitControls fallback: still Y-up, but tuned to feel less twitchy.
+    let userInteracted = false;
 
-let userInteracted = false;
-controls.addEventListener("start", () => { userInteracted = true; });
+    // Some controls dispatch events; guard just in case
+    controls.addEventListener?.("start", () => { userInteracted = true; });
+    controls.addEventListener?.("change", () => { userInteracted = true; });
 
-function setViewFrom(directionVec3) {
-  const dist = camera.position.distanceTo(controls.target) || 10;
-  camera.up.set(0, 1, 0);
-  const dir = directionVec3.clone().normalize();
-  camera.position.copy(controls.target.clone().add(dir.multiplyScalar(dist)));
-  camera.updateProjectionMatrix();
-  controls.update();
-}
-
-btnX?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 1, 0, 0)));
-btnY?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 0, 1, 0)));
-btnZ?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 0, 0, 1)));
-btnIso?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 1, 0.85, 1)));
-// PASTE ENDS HERE
-
-function snapView(upAxis /* THREE.Vector3 */) {
-  // Keep current zoom-ish distance if possible
-  const dist = camera.position.distanceTo(controls.target) || 10;
-
-  // Set the screen "vertical" axis
-  camera.up.copy(upAxis);
-
-  // Pick a view direction that isn't parallel to the up axis
-  // (so OrbitControls doesn't get into a gimbal-y singularity)
-  let viewDir = new THREE.Vector3(1, 1, 1).normalize();
-  if (Math.abs(viewDir.dot(upAxis)) > 0.95) {
-    viewDir = new THREE.Vector3(1, 0.2, 0.6).normalize();
-  }
-
-  // Position camera at target + dist * viewDir
-  const pos = controls.target.clone().add(viewDir.multiplyScalar(dist));
-  camera.position.copy(pos);
-
-  camera.updateProjectionMatrix();
-  controls.update();
-}
-
-btnUpX?.addEventListener("click", () => snapView(new THREE.Vector3(1, 0, 0)));
-btnUpY?.addEventListener("click", () => snapView(new THREE.Vector3(0, 1, 0)));
-btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
-
+    // Common-ish tuning
+    if (controlsKind === "TrackballControls") {
+      controls.rotateSpeed = 3.5;
+      controls.zoomSpeed   = 1.15;
+      controls.panSpeed    = 0.8;
+      controls.dynamicDampingFactor = 0.10;
+      controls.noZoom = false;
+      controls.noPan  = false;
+      controls.noRotate = false;
+      // Allow roll so “grab and rotate” feels natural
+      controls.noRoll = false;
+      controls.target.set(0, 0, 0);
+    } else {
+      // OrbitControls fallback
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.rotateSpeed = 0.7;
+      controls.zoomSpeed = 0.9;
+      controls.panSpeed = 0.6;
+      controls.screenSpacePanning = true;
+      controls.enablePan = true;
+      controls.target.set(0, 0, 0);
+    }
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -548,70 +535,63 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
     let axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
 
-      function makeTextSprite(text) {
+    function makeTextSprite(text) {
       const canvas = document.createElement("canvas");
       const ctx = canvas.getContext("2d");
-    
-      // Crisp-ish text
+
       const fontSize = 64;
       ctx.font = `bold ${fontSize}px Arial`;
       const padding = 24;
       const textWidth = ctx.measureText(text).width;
-    
+
       canvas.width = Math.ceil(textWidth + padding * 2);
       canvas.height = fontSize + padding * 2;
-    
-      // Re-apply font after resizing canvas
+
       ctx.font = `bold ${fontSize}px Arial`;
       ctx.textBaseline = "middle";
       ctx.textAlign = "center";
-    
-      // White background with slight border
+
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.strokeStyle = "rgba(0,0,0,0.15)";
       ctx.lineWidth = 6;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.strokeRect(0, 0, canvas.width, canvas.height);
-    
-      // Text
+
       ctx.fillStyle = "#111";
       ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-    
+
       const texture = new THREE.CanvasTexture(canvas);
       texture.minFilter = THREE.LinearFilter;
-    
+
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
       const sprite = new THREE.Sprite(material);
-    
       return sprite;
     }
-    
+
     function addAxisLabels(axisSize) {
-      // Remove old labels if they exist
       if (scene.userData.axisLabels) {
         scene.userData.axisLabels.forEach(s => scene.remove(s));
       }
-    
-      const offset = axisSize * 1.05;  // put labels just past axis tips
-      const scale = axisSize * 0.18;   // label size relative to axis size
-    
+
+      const offset = axisSize * 1.05;
+      const scale = axisSize * 0.18;
+
       const xLab = makeTextSprite("+X");
       xLab.position.set(offset, 0, 0);
       xLab.scale.set(scale, scale * 0.6, 1);
-    
+
       const yLab = makeTextSprite("+Y");
       yLab.position.set(0, offset, 0);
       yLab.scale.set(scale, scale * 0.6, 1);
-    
+
       const zLab = makeTextSprite("+Z");
       zLab.position.set(0, 0, offset);
       zLab.scale.set(scale, scale * 0.6, 1);
-    
+
       scene.add(xLab, yLab, zLab);
       scene.userData.axisLabels = [xLab, yLab, zLab];
     }
 
-    
     const grid = new THREE.GridHelper(10, 10, 0xdddddd, 0xeeeeee);
     grid.material.transparent = true;
     grid.material.opacity = 0.6;
@@ -634,6 +614,9 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
+
+      // TrackballControls has handleResize() in many builds; OrbitControls does not.
+      controls.handleResize?.();
     }
 
     if (window.ResizeObserver) {
@@ -645,11 +628,38 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
     resizeRenderer();
 
     function clearGroup(g) {
-      while (g.children.length) {
-        const obj = g.children.pop();
-        // ArrowHelper doesn't expose geometry/material in the same way, but this is safe to leave.
-      }
+      while (g.children.length) g.children.pop();
     }
+
+    // ---- View buttons (also fixes “pole” singularity when looking from +Y)
+    const btnX  = document.getElementById("viewX");
+    const btnY  = document.getElementById("viewY");
+    const btnZ  = document.getElementById("viewZ");
+    const btnIso = document.getElementById("viewIso");
+
+    function setView(dirVec3, upVec3) {
+      userInteracted = true;
+
+      const target = controls.target || new THREE.Vector3(0,0,0);
+      const dist = camera.position.distanceTo(target) || 10;
+
+      const dirN = dirVec3.clone().normalize();
+      const upN = upVec3 ? upVec3.clone().normalize() : new THREE.Vector3(0,1,0);
+
+      camera.up.copy(upN);
+      camera.position.copy(target.clone().add(dirN.multiplyScalar(dist)));
+      camera.lookAt(target);
+      camera.updateProjectionMatrix();
+
+      // Reset internal “drag start” states for TrackballControls so it doesn’t jump
+      controls.update?.();
+    }
+
+    btnX?.addEventListener("click", () => setView(new THREE.Vector3( 1, 0, 0), new THREE.Vector3(0, 1, 0)));
+    // Looking from +Y (down onto origin): use +Z as "up" so controls don't hit a singularity
+    btnY?.addEventListener("click", () => setView(new THREE.Vector3( 0, 1, 0), new THREE.Vector3(0, 0, 1)));
+    btnZ?.addEventListener("click", () => setView(new THREE.Vector3( 0, 0, 1), new THREE.Vector3(0, 1, 0)));
+    btnIso?.addEventListener("click", () => setView(new THREE.Vector3( 1, 0.85, 1), new THREE.Vector3(0, 1, 0)));
 
     function update3DPlot(validVectors, Rx, Ry, Rz) {
       clearGroup(forcesGroup);
@@ -671,7 +681,6 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
       scene.add(axesHelper);
 
       addAxisLabels(axisSize);
-
       grid.scale.set(axisSize/5, 1, axisSize/5);
 
       const gray = 0x777777;
@@ -693,15 +702,20 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
         resultantGroup.add(rArrow);
       }
 
-      const d = maxLen * 2.4;
-      camera.position.set(d, d*0.85, d);
+      // Keep clipping planes reasonable as vectors grow/shrink
       camera.near = Math.max(0.01, maxLen * 0.001);
       camera.far  = Math.max(1000, maxLen * 25);
       camera.updateProjectionMatrix();
-      controls.target.set(0, 0, 0);
-      controls.update();
 
-      // Hide status once things are drawing
+      // IMPORTANT: don't keep yanking the camera around after the user starts interacting.
+      if (!userInteracted) {
+        const d = maxLen * 2.4;
+        camera.up.set(0, 1, 0);
+        camera.position.set(d, d*0.85, d);
+        camera.lookAt(controls.target);
+        controls.update?.();
+      }
+
       if (statusEl) statusEl.style.display = "none";
     }
 
@@ -710,14 +724,14 @@ btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
 
     function animate() {
       requestAnimationFrame(animate);
-      controls.update();
+      controls.update?.();
       renderer.render(scene, camera);
     }
     animate();
 
   } catch (e) {
     console.error("3D plot failed to load:", e);
-    setStatus("3D plot could not load here (blocked external scripts). The calculator still works. If needed, we can self-host Three.js files.");
+    setStatus("3D plot could not load here. The calculator still works. If needed, we can self-host Three.js control files.");
   }
 </script>
 </body>
