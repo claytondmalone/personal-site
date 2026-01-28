@@ -11,7 +11,7 @@
 
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>3D Vector Resultant Calculator</title>
+  <title>Vector Resultant Calculator (3D)</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
     h1 { font-size: 18px; margin: 0 0 10px; }
@@ -83,7 +83,7 @@
   </style>
 </head>
 <body>
-  <h1>3D Vector Resultant Calculator (Direction Angles)</h1>
+  <h1>Vector Resultant Calculator (3D)</h1>
   <div class="muted">
     Enter magnitude and all three <strong>direction angles</strong> θx, θy, θz (degrees from +x, +y, +z).
     Valid directions satisfy: <strong>cos²θx + cos²θy + cos²θz = 1</strong>.
@@ -166,9 +166,11 @@
         <span><span class="swatch swGray"></span> Gray: individual force vectors (from origin)</span>
         <span><span class="swatch swRed"></span> Red: resultant vector (from origin)</span>
       
-        <button type="button" id="viewUpX" style="padding:4px 8px;font-size:12px;">Up = +X</button>
-        <button type="button" id="viewUpY" style="padding:4px 8px;font-size:12px;">Up = +Y</button>
-        <button type="button" id="viewUpZ" style="padding:4px 8px;font-size:12px;">Up = +Z</button>
+        <button type="button" id="viewX" style="padding:4px 8px;font-size:12px;">View +X</button>
+        <button type="button" id="viewY" style="padding:4px 8px;font-size:12px;">View +Y</button>
+        <button type="button" id="viewZ" style="padding:4px 8px;font-size:12px;">View +Z</button>
+        <button type="button" id="viewIso" style="padding:4px 8px;font-size:12px;">Isometric</button>
+
       
         <span class="muted">Drag to rotate • Scroll to zoom</span>
       </div>
@@ -487,10 +489,29 @@
     controls.panSpeed = 0.6;
 
     controls.target.set(0, 0, 0);
+// PASTE STARTS HERE
+const btnX  = document.getElementById("viewX");
+const btnY  = document.getElementById("viewY");
+const btnZ  = document.getElementById("viewZ");
+const btnIso = document.getElementById("viewIso");
 
-    const btnUpX = document.getElementById("viewUpX");
-const btnUpY = document.getElementById("viewUpY");
-const btnUpZ = document.getElementById("viewUpZ");
+let userInteracted = false;
+controls.addEventListener("start", () => { userInteracted = true; });
+
+function setViewFrom(directionVec3) {
+  const dist = camera.position.distanceTo(controls.target) || 10;
+  camera.up.set(0, 1, 0);
+  const dir = directionVec3.clone().normalize();
+  camera.position.copy(controls.target.clone().add(dir.multiplyScalar(dist)));
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+btnX?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 1, 0, 0)));
+btnY?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 0, 1, 0)));
+btnZ?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 0, 0, 1)));
+btnIso?.addEventListener("click", () => setViewFrom(new THREE.Vector3( 1, 0.85, 1)));
+// PASTE ENDS HERE
 
 function snapView(upAxis /* THREE.Vector3 */) {
   // Keep current zoom-ish distance if possible
