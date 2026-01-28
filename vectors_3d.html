@@ -166,10 +166,11 @@
         <span><span class="swatch swGray"></span> Gray: individual force vectors (from origin)</span>
         <span><span class="swatch swRed"></span> Red: resultant vector (from origin)</span>
 
-        <button type="button" id="viewX" style="padding:4px 8px;font-size:12px;">View +X</button>
-        <button type="button" id="viewY" style="padding:4px 8px;font-size:12px;">View +Y</button>
-        <button type="button" id="viewZ" style="padding:4px 8px;font-size:12px;">View +Z</button>
-        <button type="button" id="viewIso" style="padding:4px 8px;font-size:12px;">Isometric</button>
+        <!-- These now mean: “isometric view with +X (or +Y / +Z) as the vertical screen axis” -->
+        <button type="button" id="viewX" style="padding:4px 8px;font-size:12px;">+X vertical</button>
+        <button type="button" id="viewY" style="padding:4px 8px;font-size:12px;">+Y vertical</button>
+        <button type="button" id="viewZ" style="padding:4px 8px;font-size:12px;">+Z vertical</button>
+        <button type="button" id="viewIso" style="padding:4px 8px;font-size:12px;">Reset iso</button>
 
         <span class="muted">Drag to rotate • Scroll to zoom</span>
       </div>
@@ -375,7 +376,6 @@
   function update() {
     const rows = [...inputBody.querySelectorAll("tr")];
 
-    // Ensure comp table aligned
     if (rows.some(r => !r._compRow)) rebuildCompTable();
 
     let Rx = 0, Ry = 0, Rz = 0;
@@ -421,24 +421,19 @@
 
     RvecBelowEl.innerHTML = `<strong>R = ${fmtParen(Rx)}i + ${fmtParen(Ry)}j + ${fmtParen(Rz)}k</strong>`;
 
-    // Update plot (valid only). If plot isn't loaded, this is a no-op.
     window.__plot3d_update(validVectors, Rx, Ry, Rz);
   }
 
   function reset() {
     inputBody.innerHTML = "";
-    // Valid examples (cos^2 sum = 1):
-    // 45,60,60: 0.5 + 0.25 + 0.25 = 1
-    // 90,45,45: 0 + 0.5 + 0.5 = 1
     makeRow(350, 45, 60, 60);
     makeRow(100, 90, 45, 45);
-    makeRow(250, 120, 60, 60); // cos(120)=-0.5 -> square 0.25
+    makeRow(250, 120, 60, 60);
     relabel();
     update();
   }
 
   addBtn.addEventListener("click", () => {
-    // Default to valid angles
     makeRow(100, 45, 60, 60);
     relabel();
     update();
@@ -450,7 +445,6 @@
 })();
 </script>
 
-<!-- Optional 3D plot loader: if this fails, the calculator still works -->
 <script type="module">
   const statusEl = document.getElementById("plotStatus");
   const container = document.getElementById("plot3d");
@@ -461,26 +455,12 @@
   }
 
   try {
-    // Use dynamic imports so a failure doesn't break the whole page.
-    const THREE = await import("three"); // resolved by import map
+    const THREE = await import("three");
+    const modControls = await import("/assets/js/three/OrbitControls.js");
+    const OrbitControls = modControls.OrbitControls;
 
-    // Prefer TrackballControls (intuitive drag at ANY angle), fall back to OrbitControls if unavailable.
-    // If you don't already have TrackballControls.js, copy it from Three.js examples to:
-    //   /assets/js/three/TrackballControls.js
-    let ControlsCtor = null;
-    let controlsKind = "TrackballControls";
-    try {
-      const modTB = await import("/assets/js/three/TrackballControls.js");
-      ControlsCtor = modTB.TrackballControls;
-    } catch (e) {
-      const modOrbit = await import("/assets/js/three/OrbitControls.js");
-      ControlsCtor = modOrbit.OrbitControls;
-      controlsKind = "OrbitControls";
-    }
+    setStatus("3D plot ready.");
 
-    setStatus(`3D plot ready (${controlsKind}).`);
-
-    // --- Three.js scene setup ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
@@ -492,48 +472,31 @@
     camera.position.set(10, 8, 10);
     camera.up.set(0, 1, 0);
 
-    const controls = new ControlsCtor(camera, renderer.domElement);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+    controls.rotateSpeed = 0.7;
+    controls.zoomSpeed = 0.9;
+    controls.panSpeed = 0.6;
+    controls.screenSpacePanning = true;
+    controls.target.set(0, 0, 0);
+    controls.update();
 
-    // Make dragging feel stable + intuitive
-    // TrackballControls: free-rotation (no fixed world-up), which fixes the “wonky” feel at different viewpoints.
-    // OrbitControls fallback: still Y-up, but tuned to feel less twitchy.
     let userInteracted = false;
-
-    // Some controls dispatch events; guard just in case
-    controls.addEventListener?.("start", () => { userInteracted = true; });
-    controls.addEventListener?.("change", () => { userInteracted = true; });
-
-    // Common-ish tuning
-    if (controlsKind === "TrackballControls") {
-      controls.rotateSpeed = 3.5;
-      controls.zoomSpeed   = 1.15;
-      controls.panSpeed    = 0.8;
-      controls.dynamicDampingFactor = 0.10;
-      controls.noZoom = false;
-      controls.noPan  = false;
-      controls.noRotate = false;
-      // Allow roll so “grab and rotate” feels natural
-      controls.noRoll = false;
-      controls.target.set(0, 0, 0);
-    } else {
-      // OrbitControls fallback
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.06;
-      controls.rotateSpeed = 0.7;
-      controls.zoomSpeed = 0.9;
-      controls.panSpeed = 0.6;
-      controls.screenSpacePanning = true;
-      controls.enablePan = true;
-      controls.target.set(0, 0, 0);
-    }
+    controls.addEventListener("start", () => { userInteracted = true; });
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
     dir.position.set(10, 15, 8);
     scene.add(dir);
 
+    // ---- World group: rotate THIS to change which axis is vertical
+    const worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+
+    // Helpers/objects live inside worldGroup
     let axesHelper = new THREE.AxesHelper(5);
-    scene.add(axesHelper);
+    worldGroup.add(axesHelper);
 
     function makeTextSprite(text) {
       const canvas = document.createElement("canvas");
@@ -564,13 +527,12 @@
       texture.minFilter = THREE.LinearFilter;
 
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
-      const sprite = new THREE.Sprite(material);
-      return sprite;
+      return new THREE.Sprite(material);
     }
 
     function addAxisLabels(axisSize) {
-      if (scene.userData.axisLabels) {
-        scene.userData.axisLabels.forEach(s => scene.remove(s));
+      if (worldGroup.userData.axisLabels) {
+        worldGroup.userData.axisLabels.forEach(s => worldGroup.remove(s));
       }
 
       const offset = axisSize * 1.05;
@@ -588,25 +550,26 @@
       zLab.position.set(0, 0, offset);
       zLab.scale.set(scale, scale * 0.6, 1);
 
-      scene.add(xLab, yLab, zLab);
-      scene.userData.axisLabels = [xLab, yLab, zLab];
+      worldGroup.add(xLab, yLab, zLab);
+      worldGroup.userData.axisLabels = [xLab, yLab, zLab];
     }
 
+    // GridHelper is XZ plane by default (normal +Y). We'll rotate worldGroup instead of grid itself.
     const grid = new THREE.GridHelper(10, 10, 0xdddddd, 0xeeeeee);
     grid.material.transparent = true;
     grid.material.opacity = 0.6;
-    scene.add(grid);
+    worldGroup.add(grid);
 
     const originDot = new THREE.Mesh(
       new THREE.SphereGeometry(0.12, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0x333333 })
     );
-    scene.add(originDot);
+    worldGroup.add(originDot);
 
     const forcesGroup = new THREE.Group();
     const resultantGroup = new THREE.Group();
-    scene.add(forcesGroup);
-    scene.add(resultantGroup);
+    worldGroup.add(forcesGroup);
+    worldGroup.add(resultantGroup);
 
     function resizeRenderer() {
       const w = container.clientWidth || 800;
@@ -614,9 +577,6 @@
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-
-      // TrackballControls has handleResize() in many builds; OrbitControls does not.
-      controls.handleResize?.();
     }
 
     if (window.ResizeObserver) {
@@ -631,35 +591,47 @@
       while (g.children.length) g.children.pop();
     }
 
-    // ---- View buttons (also fixes “pole” singularity when looking from +Y)
+    // ---- View preset: always keep an iso camera, but rotate the *world* so chosen axis is vertical.
+    // This avoids changing camera.up (OrbitControls caches up internally in many builds).
     const btnX  = document.getElementById("viewX");
     const btnY  = document.getElementById("viewY");
     const btnZ  = document.getElementById("viewZ");
     const btnIso = document.getElementById("viewIso");
 
-    function setView(dirVec3, upVec3) {
-      userInteracted = true;
-
-      const target = controls.target || new THREE.Vector3(0,0,0);
-      const dist = camera.position.distanceTo(target) || 10;
-
-      const dirN = dirVec3.clone().normalize();
-      const upN = upVec3 ? upVec3.clone().normalize() : new THREE.Vector3(0,1,0);
-
-      camera.up.copy(upN);
-      camera.position.copy(target.clone().add(dirN.multiplyScalar(dist)));
+    function setIsoCameraKeepDistance() {
+      const target = controls.target.clone();
+      const dist = camera.position.distanceTo(target) || 12;
+      const isoDir = new THREE.Vector3(1, 1, 1).normalize(); // classic iso direction
+      camera.position.copy(target.clone().add(isoDir.multiplyScalar(dist)));
       camera.lookAt(target);
       camera.updateProjectionMatrix();
-
-      // Reset internal “drag start” states for TrackballControls so it doesn’t jump
-      controls.update?.();
+      controls.update();
     }
 
-    btnX?.addEventListener("click", () => setView(new THREE.Vector3( 1, 0, 0), new THREE.Vector3(0, 1, 0)));
-    // Looking from +Y (down onto origin): use +Z as "up" so controls don't hit a singularity
-    btnY?.addEventListener("click", () => setView(new THREE.Vector3( 0, 1, 0), new THREE.Vector3(0, 0, 1)));
-    btnZ?.addEventListener("click", () => setView(new THREE.Vector3( 0, 0, 1), new THREE.Vector3(0, 1, 0)));
-    btnIso?.addEventListener("click", () => setView(new THREE.Vector3( 1, 0.85, 1), new THREE.Vector3(0, 1, 0)));
+    function setVerticalAxis(axis /* 'X'|'Y'|'Z' */) {
+      // Make the selected axis point along +Y in screen/world-up terms by rotating the worldGroup.
+      // Y vertical: identity
+      // X vertical: rotate world +90° about Z so +X maps to +Y
+      // Z vertical: rotate world -90° about X so +Z maps to +Y
+      worldGroup.rotation.set(0, 0, 0);
+      if (axis === "X") {
+        worldGroup.rotation.set(0, 0, Math.PI / 2);
+      } else if (axis === "Z") {
+        worldGroup.rotation.set(-Math.PI / 2, 0, 0);
+      }
+      worldGroup.updateMatrixWorld(true);
+    }
+
+    function setIsoWithVertical(axis) {
+      userInteracted = true;
+      setVerticalAxis(axis);
+      setIsoCameraKeepDistance();
+    }
+
+    btnX?.addEventListener("click", () => setIsoWithVertical("X"));
+    btnY?.addEventListener("click", () => setIsoWithVertical("Y"));
+    btnZ?.addEventListener("click", () => setIsoWithVertical("Z"));
+    btnIso?.addEventListener("click", () => { userInteracted = true; setVerticalAxis("Y"); setIsoCameraKeepDistance(); });
 
     function update3DPlot(validVectors, Rx, Ry, Rz) {
       clearGroup(forcesGroup);
@@ -676,11 +648,14 @@
 
       const axisSize = maxLen * 1.15;
 
-      scene.remove(axesHelper);
+      // rebuild axes helper to match scale
+      worldGroup.remove(axesHelper);
       axesHelper = new THREE.AxesHelper(axisSize);
-      scene.add(axesHelper);
+      worldGroup.add(axesHelper);
 
       addAxisLabels(axisSize);
+
+      // keep grid scale consistent
       grid.scale.set(axisSize/5, 1, axisSize/5);
 
       const gray = 0x777777;
@@ -702,36 +677,38 @@
         resultantGroup.add(rArrow);
       }
 
-      // Keep clipping planes reasonable as vectors grow/shrink
       camera.near = Math.max(0.01, maxLen * 0.001);
       camera.far  = Math.max(1000, maxLen * 25);
       camera.updateProjectionMatrix();
 
-      // IMPORTANT: don't keep yanking the camera around after the user starts interacting.
+      // only set a default iso camera the first time (don’t fight the user)
       if (!userInteracted) {
+        setVerticalAxis("Y");
         const d = maxLen * 2.4;
-        camera.up.set(0, 1, 0);
         camera.position.set(d, d*0.85, d);
         camera.lookAt(controls.target);
-        controls.update?.();
+        controls.update();
       }
 
       if (statusEl) statusEl.style.display = "none";
     }
 
-    // Expose hook called by the calculator
     window.__plot3d_update = update3DPlot;
+
+    // Start in +Y vertical iso
+    setVerticalAxis("Y");
+    setIsoCameraKeepDistance();
 
     function animate() {
       requestAnimationFrame(animate);
-      controls.update?.();
+      controls.update();
       renderer.render(scene, camera);
     }
     animate();
 
   } catch (e) {
     console.error("3D plot failed to load:", e);
-    setStatus("3D plot could not load here. The calculator still works. If needed, we can self-host Three.js control files.");
+    setStatus("3D plot could not load here (blocked external scripts). The calculator still works. If needed, we can self-host Three.js files.");
   }
 </script>
 </body>
