@@ -487,6 +487,70 @@
     let axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
 
+      function makeTextSprite(text) {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+    
+      // Crisp-ish text
+      const fontSize = 64;
+      ctx.font = `bold ${fontSize}px Arial`;
+      const padding = 24;
+      const textWidth = ctx.measureText(text).width;
+    
+      canvas.width = Math.ceil(textWidth + padding * 2);
+      canvas.height = fontSize + padding * 2;
+    
+      // Re-apply font after resizing canvas
+      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+    
+      // White background with slight border
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.lineWidth = 6;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    
+      // Text
+      ctx.fillStyle = "#111";
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.minFilter = THREE.LinearFilter;
+    
+      const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+      const sprite = new THREE.Sprite(material);
+    
+      return sprite;
+    }
+    
+    function addAxisLabels(axisSize) {
+      // Remove old labels if they exist
+      if (scene.userData.axisLabels) {
+        scene.userData.axisLabels.forEach(s => scene.remove(s));
+      }
+    
+      const offset = axisSize * 1.05;  // put labels just past axis tips
+      const scale = axisSize * 0.18;   // label size relative to axis size
+    
+      const xLab = makeTextSprite("+X");
+      xLab.position.set(offset, 0, 0);
+      xLab.scale.set(scale, scale * 0.6, 1);
+    
+      const yLab = makeTextSprite("+Y");
+      yLab.position.set(0, offset, 0);
+      yLab.scale.set(scale, scale * 0.6, 1);
+    
+      const zLab = makeTextSprite("+Z");
+      zLab.position.set(0, 0, offset);
+      zLab.scale.set(scale, scale * 0.6, 1);
+    
+      scene.add(xLab, yLab, zLab);
+      scene.userData.axisLabels = [xLab, yLab, zLab];
+    }
+
+    
     const grid = new THREE.GridHelper(10, 10, 0xdddddd, 0xeeeeee);
     grid.material.transparent = true;
     grid.material.opacity = 0.6;
@@ -544,6 +608,8 @@
       scene.remove(axesHelper);
       axesHelper = new THREE.AxesHelper(axisSize);
       scene.add(axesHelper);
+
+      addAxisLabels(axisSize);
 
       grid.scale.set(axisSize/5, 1, axisSize/5);
 
