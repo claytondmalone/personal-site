@@ -14,7 +14,7 @@
     }
 
     .card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fff; }
-    .btns { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+    .btns { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; align-items:center; }
     button { padding: 6px 10px; font-size: 13px; cursor: pointer; }
     .note { font-size: 12px; color: #555; line-height: 1.35; margin-top: 8px; }
     .kpi { font-variant-numeric: tabular-nums; }
@@ -39,7 +39,7 @@
     .ok { color: #1b7f2a; }
     .bad { color: #b00020; }
 
-    /* 3D plot container */
+    /* 3D plot */
     .plotWrap { margin-top: 14px; }
     .plot3d {
       width: 100%;
@@ -62,6 +62,16 @@
     .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; vertical-align: -2px; }
     .swGray { background:#777; }
     .swRed { background:#c40000; }
+
+    .plotStatus {
+      position:absolute; left:12px; top:10px;
+      font-size:12px; color:#555;
+      background: rgba(255,255,255,0.9);
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 6px 8px;
+      max-width: 95%;
+    }
   </style>
 </head>
 <body>
@@ -76,6 +86,7 @@
       <button id="addBtn">Add vector</button>
       <button id="resetBtn">Reset</button>
       <span class="pill">Inputs: F, θx, θy, θz</span>
+      <span class="muted">(3D plot loads below if allowed)</span>
     </div>
 
     <!-- INPUT TABLE -->
@@ -140,7 +151,9 @@
     <!-- 3D PLOT -->
     <div class="plotWrap">
       <div class="muted"><strong>3D Visualization (concurrent vectors)</strong></div>
-      <div id="plot3d" class="plot3d" aria-label="3D vector plot"></div>
+      <div id="plot3d" class="plot3d" aria-label="3D vector plot">
+        <div id="plotStatus" class="plotStatus">Loading 3D plot…</div>
+      </div>
       <div class="plotLegend">
         <span><span class="swatch swGray"></span> Gray: individual force vectors (from origin)</span>
         <span><span class="swatch swRed"></span> Red: resultant vector (from origin)</span>
@@ -149,62 +162,299 @@
     </div>
   </div>
 
-<!-- Three.js (module) -->
+<script>
+(function() {
+  const inputBody = document.getElementById("inputBody");
+  const compBody  = document.getElementById("compBody");
+
+  const addBtn = document.getElementById("addBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const RxEl = document.getElementById("Rx");
+  const RyEl = document.getElementById("Ry");
+  const RzEl = document.getElementById("Rz");
+  const RmagEl = document.getElementById("Rmag");
+
+  const thRxEl = document.getElementById("thRx");
+  const thRyEl = document.getElementById("thRy");
+  const thRzEl = document.getElementById("thRz");
+  const statusEl = document.getElementById("status");
+
+  const RvecBelowEl = document.getElementById("RvecBelow");
+
+  // ---- Helpers
+  const EPS0 = 5e-10;      // snap tiny values to 0
+  const TOL_SUM = 0.02;    // tolerance on (cos^2 sum) around 1.0 (±0.02)
+
+  const deg2rad = (d) => d * Math.PI / 180;
+  const rad2deg = (r) => r * 180 / Math.PI;
+  const clamp01 = (x) => Math.max(-1, Math.min(1, x));
+
+  const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+  const fmtDeg = (x) => (Number.isFinite(x) ? `${x.toFixed(1)}°` : "—");
+
+  // + for positive, - for negative, blank for 0 (with snap)
+  const fmtSigned = (x) => {
+    if (!Number.isFinite(x)) return "—";
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    if (v === 0) return "";
+    return (v > 0 ? "+" : "") + v.toFixed(1);
+  };
+
+  // Parenthesized numeric value: (12.3), (-12.3), (0.0)
+  const fmtParen = (x) => {
+    if (!Number.isFinite(x)) return "(—)";
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    return `(${v.toFixed(1)})`;
+  };
+
+  // Plot hook (no-op until Three.js loads)
+  window.__plot3d_update = function(_validVectors, _Rx, _Ry, _Rz) {};
+
+  function rebuildCompTable() {
+    compBody.innerHTML = "";
+    [...inputBody.querySelectorAll("tr")].forEach(tr => {
+      const r = document.createElement("tr");
+      r.innerHTML = `
+        <td>${tr._label || ""}</td>
+        <td class="fx">—</td>
+        <td class="fy">—</td>
+        <td class="fz">—</td>
+      `;
+      tr._compRow = r;
+      tr._fxCell = r.querySelector(".fx");
+      tr._fyCell = r.querySelector(".fy");
+      tr._fzCell = r.querySelector(".fz");
+      compBody.appendChild(r);
+    });
+  }
+
+  function relabel() {
+    [...inputBody.querySelectorAll("tr")].forEach((tr, i) => {
+      tr._label = `F${i+1}`;
+      tr.querySelector(".lbl").textContent = tr._label;
+    });
+    rebuildCompTable();
+  }
+
+  function makeRow(mag=100, thx=45, thy=60, thz=60) {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td class="lbl"></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="validCell validMark">—</td>
+      <td class="rowbtn"></td>
+    `;
+
+    const tdMag = tr.children[1];
+    const inMag = document.createElement("input");
+    inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
+    tdMag.appendChild(inMag);
+
+    const tdThx = tr.children[2];
+    const inThx = document.createElement("input");
+    inThx.type = "number"; inThx.step = "any"; inThx.value = thx;
+    tdThx.appendChild(inThx);
+
+    const tdThy = tr.children[3];
+    const inThy = document.createElement("input");
+    inThy.type = "number"; inThy.step = "any"; inThy.value = thy;
+    tdThy.appendChild(inThy);
+
+    const tdThz = tr.children[4];
+    const inThz = document.createElement("input");
+    inThz.type = "number"; inThz.step = "any"; inThz.value = thz;
+    tdThz.appendChild(inThz);
+
+    const validMark = tr.querySelector(".validMark");
+
+    const tdDel = tr.children[6];
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    tdDel.appendChild(delBtn);
+
+    tr._mag = inMag;
+    tr._thx = inThx;
+    tr._thy = inThy;
+    tr._thz = inThz;
+    tr._validCell = validMark;
+
+    function onChange(){ update(); }
+    inMag.addEventListener("input", onChange);
+    inThx.addEventListener("input", onChange);
+    inThy.addEventListener("input", onChange);
+    inThz.addEventListener("input", onChange);
+
+    delBtn.addEventListener("click", () => {
+      tr.remove();
+      relabel();
+      update();
+    });
+
+    inputBody.appendChild(tr);
+  }
+
+  function setValidMark(tr, ok) {
+    tr._validCell.textContent = ok ? "✔" : "✖";
+    tr._validCell.classList.toggle("ok", ok);
+    tr._validCell.classList.toggle("bad", !ok);
+  }
+
+  function rowSetInvalid(tr) {
+    tr.classList.add("invalid");
+    setValidMark(tr, false);
+    if (tr._fxCell) tr._fxCell.textContent = "—";
+    if (tr._fyCell) tr._fyCell.textContent = "—";
+    if (tr._fzCell) tr._fzCell.textContent = "—";
+  }
+
+  function rowSetValid(tr) {
+    tr.classList.remove("invalid");
+    setValidMark(tr, true);
+  }
+
+  function computeRow(tr) {
+    const F   = parseFloat(tr._mag.value);
+    const thx = parseFloat(tr._thx.value);
+    const thy = parseFloat(tr._thy.value);
+    const thz = parseFloat(tr._thz.value);
+
+    if (!Number.isFinite(F) || !Number.isFinite(thx) || !Number.isFinite(thy) || !Number.isFinite(thz) || F < 0) {
+      rowSetInvalid(tr);
+      return { ok:false };
+    }
+
+    const cx = Math.cos(deg2rad(thx));
+    const cy = Math.cos(deg2rad(thy));
+    const cz = Math.cos(deg2rad(thz));
+
+    const sum = cx*cx + cy*cy + cz*cz;
+    const ok = Math.abs(sum - 1) <= TOL_SUM;
+
+    if (!ok) {
+      rowSetInvalid(tr);
+      return { ok:false };
+    }
+
+    const fx0 = F * cx;
+    const fy0 = F * cy;
+    const fz0 = F * cz;
+
+    const fx = Math.abs(fx0) < EPS0 ? 0 : fx0;
+    const fy = Math.abs(fy0) < EPS0 ? 0 : fy0;
+    const fz = Math.abs(fz0) < EPS0 ? 0 : fz0;
+
+    rowSetValid(tr);
+    tr._fxCell.textContent = fmtSigned(fx);
+    tr._fyCell.textContent = fmtSigned(fy);
+    tr._fzCell.textContent = fmtSigned(fz);
+
+    return { ok:true, fx, fy, fz };
+  }
+
+  function update() {
+    const rows = [...inputBody.querySelectorAll("tr")];
+
+    // Ensure comp table aligned
+    if (rows.some(r => !r._compRow)) rebuildCompTable();
+
+    let Rx = 0, Ry = 0, Rz = 0;
+    let invalidCount = 0;
+
+    const validVectors = [];
+
+    for (const tr of rows) {
+      const out = computeRow(tr);
+      if (out.ok) {
+        Rx += out.fx; Ry += out.fy; Rz += out.fz;
+        validVectors.push({ fx: out.fx, fy: out.fy, fz: out.fz });
+      } else {
+        invalidCount += 1;
+      }
+    }
+
+    if (Math.abs(Rx) < EPS0) Rx = 0;
+    if (Math.abs(Ry) < EPS0) Ry = 0;
+    if (Math.abs(Rz) < EPS0) Rz = 0;
+
+    const Rmag = Math.hypot(Rx, Ry, Rz);
+
+    RxEl.textContent = fmtSigned(Rx);
+    RyEl.textContent = fmtSigned(Ry);
+    RzEl.textContent = fmtSigned(Rz);
+    RmagEl.textContent = fmt(Rmag);
+
+    if (Rmag < 1e-12) {
+      thRxEl.textContent = "N/A";
+      thRyEl.textContent = "N/A";
+      thRzEl.textContent = "N/A";
+    } else {
+      const thRx = rad2deg(Math.acos(clamp01(Rx / Rmag)));
+      const thRy = rad2deg(Math.acos(clamp01(Ry / Rmag)));
+      const thRz = rad2deg(Math.acos(clamp01(Rz / Rmag)));
+      thRxEl.textContent = fmtDeg(thRx);
+      thRyEl.textContent = fmtDeg(thRy);
+      thRzEl.textContent = fmtDeg(thRz);
+    }
+
+    statusEl.textContent = invalidCount === 0 ? "OK" : `Check ${invalidCount} row${invalidCount === 1 ? "" : "s"}`;
+
+    RvecBelowEl.innerHTML = `<strong>R = ${fmtParen(Rx)}i + ${fmtParen(Ry)}j + ${fmtParen(Rz)}k</strong>`;
+
+    // Update plot (valid only). If plot isn't loaded, this is a no-op.
+    window.__plot3d_update(validVectors, Rx, Ry, Rz);
+  }
+
+  function reset() {
+    inputBody.innerHTML = "";
+    // Valid examples (cos^2 sum = 1):
+    // 45,60,60: 0.5 + 0.25 + 0.25 = 1
+    // 90,45,45: 0 + 0.5 + 0.5 = 1
+    makeRow(350, 45, 60, 60);
+    makeRow(100, 90, 45, 45);
+    makeRow(250, 120, 60, 60); // cos(120)=-0.5 -> square 0.25
+    relabel();
+    update();
+  }
+
+  addBtn.addEventListener("click", () => {
+    // Default to valid angles
+    makeRow(100, 45, 60, 60);
+    relabel();
+    update();
+  });
+
+  resetBtn.addEventListener("click", reset);
+
+  reset();
+})();
+</script>
+
+<!-- Optional 3D plot loader: if this fails, the calculator still works -->
 <script type="module">
-  import * as THREE from "https://unpkg.com/three@0.161.0/build/three.module.js";
-  import { OrbitControls } from "https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js";
+  const statusEl = document.getElementById("plotStatus");
+  const container = document.getElementById("plot3d");
 
-  (function() {
-    const inputBody = document.getElementById("inputBody");
-    const compBody  = document.getElementById("compBody");
+  function setStatus(msg) {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+  }
 
-    const addBtn = document.getElementById("addBtn");
-    const resetBtn = document.getElementById("resetBtn");
+  try {
+    // Use dynamic imports so a failure doesn't break the whole page.
+    const THREE = await import("https://unpkg.com/three@0.161.0/build/three.module.js");
+    const modControls = await import("https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js");
+    const OrbitControls = modControls.OrbitControls;
 
-    const RxEl = document.getElementById("Rx");
-    const RyEl = document.getElementById("Ry");
-    const RzEl = document.getElementById("Rz");
-    const RmagEl = document.getElementById("Rmag");
+    setStatus("3D plot ready.");
 
-    const thRxEl = document.getElementById("thRx");
-    const thRyEl = document.getElementById("thRy");
-    const thRzEl = document.getElementById("thRz");
-    const statusEl = document.getElementById("status");
-
-    const RvecBelowEl = document.getElementById("RvecBelow");
-
-    // ---- Helpers
-    const EPS0 = 5e-10;      // snap tiny values to 0
-    const TOL_SUM = 0.02;    // tolerance on (cos^2 sum) around 1.0 (±0.02)
-
-    const deg2rad = (d) => d * Math.PI / 180;
-    const rad2deg = (r) => r * 180 / Math.PI;
-    const clamp01 = (x) => Math.max(-1, Math.min(1, x));
-
-    const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
-    const fmtDeg = (x) => (Number.isFinite(x) ? `${x.toFixed(1)}°` : "—");
-
-    // + for positive, - for negative, blank for 0 (with snap)
-    const fmtSigned = (x) => {
-      if (!Number.isFinite(x)) return "—";
-      const v0 = Number(x);
-      const v = Math.abs(v0) < EPS0 ? 0 : v0;
-      if (v === 0) return "";
-      return (v > 0 ? "+" : "") + v.toFixed(1);
-    };
-
-    // Parenthesized numeric value: (12.3), (-12.3), (0.0)
-    const fmtParen = (x) => {
-      if (!Number.isFinite(x)) return "(—)";
-      const v0 = Number(x);
-      const v = Math.abs(v0) < EPS0 ? 0 : v0;
-      return `(${v.toFixed(1)})`;
-    };
-
-    // =========================
-    // 3D Plot setup (Three.js)
-    // =========================
-    const container = document.getElementById("plot3d");
+    // --- Three.js scene setup ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xffffff);
 
@@ -220,13 +470,11 @@
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
 
-    // Lighting
     scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
     dir.position.set(10, 15, 8);
     scene.add(dir);
 
-    // Helpers (axes + grid)
     let axesHelper = new THREE.AxesHelper(5);
     scene.add(axesHelper);
 
@@ -235,14 +483,12 @@
     grid.material.opacity = 0.6;
     scene.add(grid);
 
-    // Origin marker
     const originDot = new THREE.Mesh(
       new THREE.SphereGeometry(0.12, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0x333333 })
     );
     scene.add(originDot);
 
-    // Groups for arrows
     const forcesGroup = new THREE.Group();
     const resultantGroup = new THREE.Group();
     scene.add(forcesGroup);
@@ -256,15 +502,18 @@
       camera.updateProjectionMatrix();
     }
 
-    const ro = new ResizeObserver(() => resizeRenderer());
-    ro.observe(container);
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => resizeRenderer());
+      ro.observe(container);
+    } else {
+      window.addEventListener("resize", resizeRenderer);
+    }
     resizeRenderer();
 
     function clearGroup(g) {
       while (g.children.length) {
         const obj = g.children.pop();
-        if (obj.geometry) obj.geometry.dispose?.();
-        if (obj.material) obj.material.dispose?.();
+        // ArrowHelper doesn't expose geometry/material in the same way, but this is safe to leave.
       }
     }
 
@@ -272,7 +521,6 @@
       clearGroup(forcesGroup);
       clearGroup(resultantGroup);
 
-      // Determine scaling / camera framing
       let maxLen = 1;
       for (const v of validVectors) {
         const len = Math.hypot(v.fx, v.fy, v.fz);
@@ -284,21 +532,17 @@
 
       const axisSize = maxLen * 1.15;
 
-      // Update helpers
       scene.remove(axesHelper);
       axesHelper = new THREE.AxesHelper(axisSize);
       scene.add(axesHelper);
 
-      // Grid size based on axis size (simple)
       grid.scale.set(axisSize/5, 1, axisSize/5);
 
-      // Arrow styling
       const gray = 0x777777;
       const red  = 0xc40000;
       const headLen = Math.max(0.35, maxLen * 0.08);
       const headWid = Math.max(0.20, maxLen * 0.04);
 
-      // Draw force arrows (from origin)
       for (const v of validVectors) {
         const len = Math.hypot(v.fx, v.fy, v.fz);
         if (len < 1e-12) continue;
@@ -307,14 +551,12 @@
         forcesGroup.add(arrow);
       }
 
-      // Draw resultant arrow (from origin)
       if (Rlen >= 1e-12) {
         const rDir = new THREE.Vector3(Rx, Ry, Rz).normalize();
         const rArrow = new THREE.ArrowHelper(rDir, new THREE.Vector3(0,0,0), Rlen, red, headLen*1.15, headWid*1.15);
         resultantGroup.add(rArrow);
       }
 
-      // Frame camera nicely
       const d = maxLen * 2.4;
       camera.position.set(d, d*0.85, d);
       camera.near = Math.max(0.01, maxLen * 0.001);
@@ -322,7 +564,13 @@
       camera.updateProjectionMatrix();
       controls.target.set(0, 0, 0);
       controls.update();
+
+      // Hide status once things are drawing
+      if (statusEl) statusEl.style.display = "none";
     }
+
+    // Expose hook called by the calculator
+    window.__plot3d_update = update3DPlot;
 
     function animate() {
       requestAnimationFrame(animate);
@@ -331,232 +579,10 @@
     }
     animate();
 
-    // =========================
-    // Table logic
-    // =========================
-    function rebuildCompTable() {
-      compBody.innerHTML = "";
-      [...inputBody.querySelectorAll("tr")].forEach(tr => {
-        const r = document.createElement("tr");
-        r.innerHTML = `
-          <td>${tr._label || ""}</td>
-          <td class="fx">—</td>
-          <td class="fy">—</td>
-          <td class="fz">—</td>
-        `;
-        tr._compRow = r;
-        tr._fxCell = r.querySelector(".fx");
-        tr._fyCell = r.querySelector(".fy");
-        tr._fzCell = r.querySelector(".fz");
-        compBody.appendChild(r);
-      });
-    }
-
-    function relabel() {
-      [...inputBody.querySelectorAll("tr")].forEach((tr, i) => {
-        tr._label = `F${i+1}`;
-        tr.querySelector(".lbl").textContent = tr._label;
-      });
-      rebuildCompTable();
-    }
-
-    function makeRow(mag=100, thx=60, thy=60, thz=60) {
-      const tr = document.createElement("tr");
-
-      tr.innerHTML = `
-        <td class="lbl"></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td></td>
-        <td class="validCell validMark">—</td>
-        <td class="rowbtn"></td>
-      `;
-
-      const tdMag = tr.children[1];
-      const inMag = document.createElement("input");
-      inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
-      tdMag.appendChild(inMag);
-
-      const tdThx = tr.children[2];
-      const inThx = document.createElement("input");
-      inThx.type = "number"; inThx.step = "any"; inThx.value = thx;
-      tdThx.appendChild(inThx);
-
-      const tdThy = tr.children[3];
-      const inThy = document.createElement("input");
-      inThy.type = "number"; inThy.step = "any"; inThy.value = thy;
-      tdThy.appendChild(inThy);
-
-      const tdThz = tr.children[4];
-      const inThz = document.createElement("input");
-      inThz.type = "number"; inThz.step = "any"; inThz.value = thz;
-      tdThz.appendChild(inThz);
-
-      const validMark = tr.querySelector(".validMark");
-
-      const tdDel = tr.children[6];
-      const delBtn = document.createElement("button");
-      delBtn.textContent = "×";
-      tdDel.appendChild(delBtn);
-
-      tr._mag = inMag;
-      tr._thx = inThx;
-      tr._thy = inThy;
-      tr._thz = inThz;
-      tr._validCell = validMark;
-
-      function onChange(){ update(); }
-      inMag.addEventListener("input", onChange);
-      inThx.addEventListener("input", onChange);
-      inThy.addEventListener("input", onChange);
-      inThz.addEventListener("input", onChange);
-
-      delBtn.addEventListener("click", () => {
-        tr.remove();
-        relabel();
-        update();
-      });
-
-      inputBody.appendChild(tr);
-    }
-
-    function setValidMark(tr, ok) {
-      tr._validCell.textContent = ok ? "✔" : "✖";
-      tr._validCell.classList.toggle("ok", ok);
-      tr._validCell.classList.toggle("bad", !ok);
-    }
-
-    function rowSetInvalid(tr) {
-      tr.classList.add("invalid");
-      setValidMark(tr, false);
-      if (tr._fxCell) tr._fxCell.textContent = "—";
-      if (tr._fyCell) tr._fyCell.textContent = "—";
-      if (tr._fzCell) tr._fzCell.textContent = "—";
-    }
-
-    function rowSetValid(tr) {
-      tr.classList.remove("invalid");
-      setValidMark(tr, true);
-    }
-
-    function computeRow(tr) {
-      const F   = parseFloat(tr._mag.value);
-      const thx = parseFloat(tr._thx.value);
-      const thy = parseFloat(tr._thy.value);
-      const thz = parseFloat(tr._thz.value);
-
-      if (!Number.isFinite(F) || !Number.isFinite(thx) || !Number.isFinite(thy) || !Number.isFinite(thz) || F < 0) {
-        rowSetInvalid(tr);
-        return { ok:false };
-      }
-
-      const cx = Math.cos(deg2rad(thx));
-      const cy = Math.cos(deg2rad(thy));
-      const cz = Math.cos(deg2rad(thz));
-
-      const sum = cx*cx + cy*cy + cz*cz;
-      const ok = Math.abs(sum - 1) <= TOL_SUM;
-
-      if (!ok) {
-        rowSetInvalid(tr);
-        return { ok:false };
-      }
-
-      const fx0 = F * cx;
-      const fy0 = F * cy;
-      const fz0 = F * cz;
-
-      const fx = Math.abs(fx0) < EPS0 ? 0 : fx0;
-      const fy = Math.abs(fy0) < EPS0 ? 0 : fy0;
-      const fz = Math.abs(fz0) < EPS0 ? 0 : fz0;
-
-      rowSetValid(tr);
-      tr._fxCell.textContent = fmtSigned(fx);
-      tr._fyCell.textContent = fmtSigned(fy);
-      tr._fzCell.textContent = fmtSigned(fz);
-
-      return { ok:true, fx, fy, fz };
-    }
-
-    function update() {
-      const rows = [...inputBody.querySelectorAll("tr")];
-
-      // ensure comp table exists and aligned
-      if (rows.some(r => !r._compRow)) rebuildCompTable();
-
-      let Rx = 0, Ry = 0, Rz = 0;
-      let invalidCount = 0;
-
-      const validVectors = [];
-
-      for (const tr of rows) {
-        const out = computeRow(tr);
-        if (out.ok) {
-          Rx += out.fx; Ry += out.fy; Rz += out.fz;
-          validVectors.push({ fx: out.fx, fy: out.fy, fz: out.fz });
-        } else {
-          invalidCount += 1;
-        }
-      }
-
-      if (Math.abs(Rx) < EPS0) Rx = 0;
-      if (Math.abs(Ry) < EPS0) Ry = 0;
-      if (Math.abs(Rz) < EPS0) Rz = 0;
-
-      const Rmag = Math.hypot(Rx, Ry, Rz);
-
-      RxEl.textContent = fmtSigned(Rx);
-      RyEl.textContent = fmtSigned(Ry);
-      RzEl.textContent = fmtSigned(Rz);
-      RmagEl.textContent = fmt(Rmag);
-
-      if (Rmag < 1e-12) {
-        thRxEl.textContent = "N/A";
-        thRyEl.textContent = "N/A";
-        thRzEl.textContent = "N/A";
-      } else {
-        const thRx = rad2deg(Math.acos(clamp01(Rx / Rmag)));
-        const thRy = rad2deg(Math.acos(clamp01(Ry / Rmag)));
-        const thRz = rad2deg(Math.acos(clamp01(Rz / Rmag)));
-        thRxEl.textContent = fmtDeg(thRx);
-        thRyEl.textContent = fmtDeg(thRy);
-        thRzEl.textContent = fmtDeg(thRz);
-      }
-
-      statusEl.textContent = invalidCount === 0 ? "OK" : `Check ${invalidCount} row${invalidCount === 1 ? "" : "s"}`;
-
-      RvecBelowEl.innerHTML = `<strong>R = ${fmtParen(Rx)}i + ${fmtParen(Ry)}j + ${fmtParen(Rz)}k</strong>`;
-
-      // Update 3D plot (valid vectors only)
-      update3DPlot(validVectors, Rx, Ry, Rz);
-    }
-
-    function reset() {
-      inputBody.innerHTML = "";
-      // Sample valid rows (cos^2 sum = 1):
-      // 60,60,60 -> each cos=0.5 -> sum=0.75 (NOT valid) so avoid that
-      // Use known valid combos:
-      // (45, 60, 60): cos^2 = 0.5 + 0.25 + 0.25 = 1
-      // (90, 45, 45): cos^2 = 0 + 0.5 + 0.5 = 1
-      makeRow(350, 45, 60, 60);
-      makeRow(100, 90, 45, 45);
-      makeRow(250, 120, 60, 60); // 120 -> cos=-0.5 -> square still 0.25, valid
-      relabel();
-      update();
-    }
-
-    addBtn.addEventListener("click", () => {
-      // default to a valid set: (45,60,60)
-      makeRow(100, 45, 60, 60);
-      relabel();
-      update();
-    });
-
-    resetBtn.addEventListener("click", reset);
-
-    reset();
-  })();
+  } catch (e) {
+    console.error("3D plot failed to load:", e);
+    setStatus("3D plot could not load here (blocked external scripts). The calculator still works. If needed, we can self-host Three.js files.");
+  }
 </script>
 </body>
 </html>
