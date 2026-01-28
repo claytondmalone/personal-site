@@ -1,1 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>3D Vector Resultant Calculator</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    .wrap { display: grid; grid-template-columns: 1.25fr 0.95fr; gap: 16px; align-items: start; }
+    h1 { font-size: 18px; margin: 0 0 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; text-align: right; }
+    th { background: #f6f6f6; text-align: right; white-space: nowrap; }
+    th:first-child, td:first-child { text-align: left; }
+    input, select { width: 110px; padding: 4px 6px; font-size: 13px; }
+    .btns { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+    button { padding: 6px 10px; font-size: 13px; cursor: pointer; }
+    .card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fff; }
+    .muted { color: #666; font-size: 12px; }
+    .kpi { font-variant-numeric: tabular-nums; }
+    .rowbtn { text-align: center; }
+    .rowbtn button { padding: 2px 8px; }
+    .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; font-size: 13px; }
+    .summary3 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; font-size: 13px; }
+    .rvec { color: #c40000; font-size: 13px; font-variant-numeric: tabular-nums; margin-top: 10px; }
+    .invalid { background: #fff2f2; }
+    .status { font-size: 12px; color: #b00020; text-align: left; }
+    .note { font-size: 12px; color: #555; line-height: 1.35; margin-top: 8px; }
+    .pill {
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      border:1px solid #ddd; background:#fafafa; font-size:12px; color:#444;
+    }
+  </style>
+</head>
+<body>
+  <h1>3D Vector Resultant Calculator (Direction Angles)</h1>
+  <div class="muted">
+    Enter magnitude and <strong>direction angles</strong> θx and θy (degrees from +x and +y). Choose the sign of the z-direction (+ or −).
+    The tool computes θz from the direction-cosine constraint: cos²θx + cos²θy + cos²θz = 1.
+  </div>
 
+  <div class="wrap">
+    <!-- Left: table -->
+    <div class="card">
+      <div class="btns">
+        <button id="addBtn">Add vector</button>
+        <button id="resetBtn">Reset</button>
+        <span class="pill">Inputs: F, θx, θy, sign(z)</span>
+      </div>
+
+      <table id="vecTable">
+        <thead>
+          <tr>
+            <th>Vector</th>
+            <th>Magnitude</th>
+            <th>θx (deg)</th>
+            <th>θy (deg)</th>
+            <th>sign(z)</th>
+            <th>θz (deg)</th>
+            <th>Fx</th>
+            <th>Fy</th>
+            <th>Fz</th>
+            <th class="rowbtn"></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="note">
+        <strong>Validity check:</strong> θx and θy must satisfy cos²θx + cos²θy ≤ 1.
+        If not, the row is highlighted and components are not computed.
+        <br/>
+        <strong>Reminder:</strong> Direction angles are typically between 0° and 180°.
+      </div>
+    </div>
+
+    <!-- Right: summary (no plotting yet) -->
+    <div class="card">
+      <div class="muted"><strong>Resultant (sum of all vectors)</strong></div>
+
+      <div class="summary3">
+        <div><strong>Rx</strong> = <span class="kpi" id="Rx">—</span></div>
+        <div><strong>Ry</strong> = <span class="kpi" id="Ry">—</span></div>
+        <div><strong>Rz</strong> = <span class="kpi" id="Rz">—</span></div>
+        <div><strong>|R|</strong> = <span class="kpi" id="Rmag">—</span></div>
+      </div>
+
+      <div class="summary" style="margin-top:12px;">
+        <div><strong>θRx</strong> = <span class="kpi" id="thRx">—</span></div>
+        <div><strong>θRy</strong> = <span class="kpi" id="thRy">—</span></div>
+        <div><strong>θRz</strong> = <span class="kpi" id="thRz">—</span></div>
+        <div><strong>Status</strong> = <span class="kpi" id="status">—</span></div>
+      </div>
+
+      <div class="rvec" id="RvecBelow"><strong>R = —</strong></div>
+
+      <div class="note">
+        <strong>Angle definition:</strong> θRx is the angle between <strong>R</strong> and the +x axis, etc.
+        Computed via θRx = acos(Rx/|R|) (similarly for y, z). If |R| = 0, direction angles are N/A.
+      </div>
+
+      <div class="note muted">
+        Plotting is intentionally omitted for now (we can add a 3D view or planar projections later).
+      </div>
+    </div>
+  </div>
+
+<script>
+(function() {
+  const tbody = document.querySelector("#vecTable tbody");
+  const addBtn = document.getElementById("addBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  const RxEl = document.getElementById("Rx");
+  const RyEl = document.getElementById("Ry");
+  const RzEl = document.getElementById("Rz");
+  const RmagEl = document.getElementById("Rmag");
+
+  const thRxEl = document.getElementById("thRx");
+  const thRyEl = document.getElementById("thRy");
+  const thRzEl = document.getElementById("thRz");
+  const statusEl = document.getElementById("status");
+
+  const RvecBelowEl = document.getElementById("RvecBelow");
+
+  // ---- Helpers
+  const EPS0 = 5e-10;   // for snapping tiny values to 0 to avoid "-0.0"
+  const TOLQ = 1e-12;   // tolerance for q = 1 - cx^2 - cy^2
+
+  const deg2rad = (d) => d * Math.PI / 180;
+  const rad2deg = (r) => r * 180 / Math.PI;
+
+  const clamp01 = (x) => Math.max(-1, Math.min(1, x));
+
+  const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : "—");
+
+  // + for positive, - for negative, blank for 0 (with snap)
+  const fmtSigned = (x) => {
+    if (!Number.isFinite(x)) return "—";
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    if (v === 0) return "";
+    return (v > 0 ? "+" : "") + v.toFixed(1);
+  };
+
+  // Parenthesized numeric value: (12.3), (-12.3), (0.0)
+  const fmtParen = (x) => {
+    if (!Number.isFinite(x)) return "(—)";
+    const v0 = Number(x);
+    const v = Math.abs(v0) < EPS0 ? 0 : v0;
+    return `(${v.toFixed(1)})`;
+  };
+
+  const fmtDeg = (x) => (Number.isFinite(x) ? `${x.toFixed(1)}°` : "—");
+
+  function makeRow(label, mag=100, thx=60, thy=60, signZ="+") {
+    const tr = document.createElement("tr");
+
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = label;
+
+    const tdMag = document.createElement("td");
+    const inMag = document.createElement("input");
+    inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
+    tdMag.appendChild(inMag);
+
+    const tdThx = document.createElement("td");
+    const inThx = document.createElement("input");
+    inThx.type = "number"; inThx.step = "any"; inThx.value = thx;
+    tdThx.appendChild(inThx);
+
+    const tdThy = document.createElement("td");
+    const inThy = document.createElement("input");
+    inThy.type = "number"; inThy.step = "any"; inThy.value = thy;
+    tdThy.appendChild(inThy);
+
+    const tdSign = document.createElement("td");
+    const selSign = document.createElement("select");
+    const optP = document.createElement("option"); optP.value = "+"; optP.textContent = "+";
+    const optN = document.createElement("option"); optN.value = "-"; optN.textContent = "−";
+    selSign.append(optP, optN);
+    selSign.value = signZ;
+    tdSign.appendChild(selSign);
+
+    const tdThz = document.createElement("td"); tdThz.textContent = "—";
+    const tdFx  = document.createElement("td"); tdFx.textContent  = "—";
+    const tdFy  = document.createElement("td"); tdFy.textContent  = "—";
+    const tdFz  = document.createElement("td"); tdFz.textContent  = "—";
+
+    const tdDel = document.createElement("td");
+    tdDel.className = "rowbtn";
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    tdDel.appendChild(delBtn);
+
+    tr.append(tdLabel, tdMag, tdThx, tdThy, tdSign, tdThz, tdFx, tdFy, tdFz, tdDel);
+    tbody.appendChild(tr);
+
+    function onChange() { update(); }
+    inMag.addEventListener("input", onChange);
+    inThx.addEventListener("input", onChange);
+    inThy.addEventListener("input", onChange);
+    selSign.addEventListener("change", onChange);
+    delBtn.addEventListener("click", () => { tr.remove(); relabel(); update(); });
+
+    tr._mag = inMag;
+    tr._thx = inThx;
+    tr._thy = inThy;
+    tr._signZ = selSign;
+
+    tr._thzCell = tdThz;
+    tr._fxCell = tdFx;
+    tr._fyCell = tdFy;
+    tr._fzCell = tdFz;
+  }
+
+  function relabel() {
+    [...tbody.querySelectorAll("tr")].forEach((tr, i) => {
+      tr.children[0].textContent = `F${i+1}`;
+    });
+  }
+
+  function rowSetInvalid(tr, msg="Invalid angles") {
+    tr.classList.add("invalid");
+    tr._thzCell.textContent = msg;
+    tr._fxCell.textContent = "—";
+    tr._fyCell.textContent = "—";
+    tr._fzCell.textContent = "—";
+  }
+
+  function rowSetValid(tr) {
+    tr.classList.remove("invalid");
+  }
+
+  function computeRow(tr) {
+    const F   = parseFloat(tr._mag.value);
+    const thx = parseFloat(tr._thx.value);
+    const thy = parseFloat(tr._thy.value);
+    const sgn = tr._signZ.value === "-" ? -1 : +1;
+
+    if (!Number.isFinite(F) || !Number.isFinite(thx) || !Number.isFinite(thy) || F < 0) {
+      rowSetInvalid(tr, "Enter valid inputs");
+      return { ok:false };
+    }
+
+    const cx = Math.cos(deg2rad(thx));
+    const cy = Math.cos(deg2rad(thy));
+
+    let q = 1 - cx*cx - cy*cy;
+
+    // invalid if q is meaningfully negative
+    if (q < -TOLQ) {
+      rowSetInvalid(tr, "Invalid: cos²θx+cos²θy>1");
+      return { ok:false };
+    }
+
+    // snap small negative to 0
+    q = Math.max(0, q);
+
+    let cz = sgn * Math.sqrt(q);
+
+    // snap tiny to 0 to avoid -0.0
+    if (Math.abs(cz) < EPS0) cz = 0;
+
+    // θz from cosθz
+    const thz = rad2deg(Math.acos(clamp01(cz)));
+
+    const fx = F * cx;
+    const fy = F * cy;
+    const fz = F * cz;
+
+    rowSetValid(tr);
+    tr._thzCell.textContent = fmtDeg(thz);
+    tr._fxCell.textContent = fmtSigned(fx);
+    tr._fyCell.textContent = fmtSigned(fy);
+    tr._fzCell.textContent = fmtSigned(fz);
+
+    return { ok:true, fx, fy, fz };
+  }
+
+  function update() {
+    const rows = [...tbody.querySelectorAll("tr")];
+
+    let Rx = 0, Ry = 0, Rz = 0;
+    let invalidCount = 0;
+
+    for (const tr of rows) {
+      const out = computeRow(tr);
+      if (out.ok) {
+        Rx += out.fx; Ry += out.fy; Rz += out.fz;
+      } else {
+        invalidCount += 1;
+      }
+    }
+
+    // snap tiny sums
+    if (Math.abs(Rx) < EPS0) Rx = 0;
+    if (Math.abs(Ry) < EPS0) Ry = 0;
+    if (Math.abs(Rz) < EPS0) Rz = 0;
+
+    const Rmag = Math.hypot(Rx, Ry, Rz);
+
+    RxEl.textContent = fmtSigned(Rx);
+    RyEl.textContent = fmtSigned(Ry);
+    RzEl.textContent = fmtSigned(Rz);
+    RmagEl.textContent = fmt(Rmag);
+
+    if (Rmag < 1e-12) {
+      thRxEl.textContent = "N/A";
+      thRyEl.textContent = "N/A";
+      thRzEl.textContent = "N/A";
+    } else {
+      const thRx = rad2deg(Math.acos(clamp01(Rx / Rmag)));
+      const thRy = rad2deg(Math.acos(clamp01(Ry / Rmag)));
+      const thRz = rad2deg(Math.acos(clamp01(Rz / Rmag)));
+      thRxEl.textContent = fmtDeg(thRx);
+      thRyEl.textContent = fmtDeg(thRy);
+      thRzEl.textContent = fmtDeg(thRz);
+    }
+
+    statusEl.textContent =
+      invalidCount === 0
+        ? "OK"
+        : `Check ${invalidCount} row${invalidCount === 1 ? "" : "s"}`;
+
+    // Bold resultant equation with parentheses (consistent with your 2D styling)
+    RvecBelowEl.innerHTML =
+      `<strong>R = ${fmtParen(Rx)}i + ${fmtParen(Ry)}j + ${fmtParen(Rz)}k</strong>`;
+  }
+
+  function reset() {
+    tbody.innerHTML = "";
+    // A few sample rows (feel free to change)
+    makeRow("F1", 750, 60, 60, "+");
+    makeRow("F2", 500, 120, 80, "+");
+    makeRow("F3", 300, 70, 110, "-");
+    relabel();
+    update();
+  }
+
+  addBtn.addEventListener("click", () => {
+    const n = tbody.querySelectorAll("tr").length + 1;
+    makeRow(`F${n}`, 100, 60, 60, "+");
+    relabel();
+    update();
+  });
+
+  resetBtn.addEventListener("click", reset);
+
+  reset();
+})();
+</script>
+</body>
+</html>
