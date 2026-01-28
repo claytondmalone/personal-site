@@ -6,7 +6,8 @@
   <title>Clayton Malone - CV</title>
   <style>
     :root { --bg:#0b0d10; --panel:#12161b; --text:#e8ecf1; --muted:#b7c0cc; --accent:#6aa9ff; }
-    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text)}
     header{position:sticky;top:0;background:#0d1117;border-bottom:1px solid #1f2a36}
     .wrap{max-width:950px;margin:0 auto;padding:16px}
     nav{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
@@ -14,10 +15,16 @@
     .tablink.active{border-color:#1f2a36;background:var(--panel)}
     main{max-width:950px;margin:0 auto;padding:20px}
     .card{background:var(--panel);border:1px solid #1f2a36;border-radius:14px;padding:20px}
-    .tab{display:none} .tab.active{display:block}
+    .tab{display:none}
+    .tab.active{display:block}
     h1{margin:0 0 6px;font-size:28px}
     h2{margin:0 0 12px;font-size:22px}
-    p.muted{color:var(--muted);margin:0}
+    h3{margin:18px 0 8px;font-size:18px}
+    p.muted{color:var(--muted);margin:0 0 12px}
+    a.inline{color:var(--accent);text-decoration:none}
+    a.inline:hover{text-decoration:underline}
+    .tool{margin-top:14px}
+    iframe{display:block}
     @media (max-width:720px){ nav{gap:8px} }
   </style>
 </head>
@@ -47,25 +54,40 @@
 
     <section id="teaching" class="card tab" role="tabpanel" aria-labelledby="tab-teaching">
       <h2>Teaching</h2>
-      <!-- Vector Addition--->
-      <section id="teaching" class="card tab" role="tabpanel" aria-labelledby="tab-teaching">
-        <h2>Teaching</h2>
-      
+
+      <div class="tool">
+        <h3>2D Vector Resultant Tool</h3>
         <p class="muted">
-          Interactive tool: compute and visualize vector resultants (tip-to-tail).
-          <a href="/vectors.html" style="color: var(--accent);">Open full page</a>
+          Interactive tool: compute and visualize 2D vector resultants (tip-to-tail).
+          <a class="inline" href="/vectors.html">Open full page</a>
         </p>
-      
+
         <iframe
           src="/vectors.html"
           width="100%"
           height="720"
           style="border:1px solid #1f2a36;border-radius:14px;background:#fff"
           loading="lazy"
-          title="Vector Resultant Visualizer">
+          title="2D Vector Resultant Visualizer">
         </iframe>
-      </section>
+      </div>
 
+      <div class="tool">
+        <h3>3D Vector Resultant Tool</h3>
+        <p class="muted">
+          Interactive tool: compute 3D vector components and resultant using direction angles (no plotting yet).
+          <a class="inline" href="/vectors_3d.html">Open full page</a>
+        </p>
+
+        <iframe
+          src="/vectors_3d.html"
+          width="100%"
+          height="780"
+          style="border:1px solid #1f2a36;border-radius:14px;background:#fff"
+          loading="lazy"
+          title="3D Vector Resultant Calculator">
+        </iframe>
+      </div>
     </section>
   </main>
 
