@@ -24,7 +24,7 @@
     th { background: #f6f6f6; white-space: nowrap; }
     th:first-child, td:first-child { text-align: left; }
 
-    input, select { width: 110px; padding: 4px 6px; font-size: 13px; }
+    input { width: 110px; padding: 4px 6px; font-size: 13px; }
     .rowbtn { text-align: center; }
     .rowbtn button { padding: 2px 8px; }
 
@@ -34,23 +34,27 @@
 
     .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; font-size: 13px; }
     .rvec { color: #c40000; font-size: 13px; font-variant-numeric: tabular-nums; margin-top: 10px; }
+
+    .validCell { text-align: center; font-weight: 700; }
+    .ok { color: #1b7f2a; }
+    .bad { color: #b00020; }
   </style>
 </head>
 <body>
   <h1>3D Vector Resultant Calculator (Direction Angles)</h1>
   <div class="muted">
-    Enter magnitude and <strong>direction angles</strong> θx and θy (degrees from +x and +y). Choose the sign of the z-direction (+ or −).
-    The tool computes θz from: cos²θx + cos²θy + cos²θz = 1.
+    Enter magnitude and all three <strong>direction angles</strong> θx, θy, θz (degrees from +x, +y, +z).
+    Valid directions satisfy: <strong>cos²θx + cos²θy + cos²θz = 1</strong>.
   </div>
 
   <div class="card" style="margin-top:12px;">
     <div class="btns">
       <button id="addBtn">Add vector</button>
       <button id="resetBtn">Reset</button>
-      <span class="pill">Inputs: F, θx, θy, sign(z)</span>
+      <span class="pill">Inputs: F, θx, θy, θz</span>
     </div>
 
-    <!-- INPUT TABLE (narrower) -->
+    <!-- INPUT TABLE -->
     <table id="inputTable">
       <thead>
         <tr>
@@ -58,8 +62,8 @@
           <th>Magnitude</th>
           <th>θx (deg)</th>
           <th>θy (deg)</th>
-          <th>sign(z)</th>
           <th>θz (deg)</th>
+          <th class="validCell">Valid?</th>
           <th class="rowbtn"></th>
         </tr>
       </thead>
@@ -67,12 +71,11 @@
     </table>
 
     <div class="note">
-      <strong>Validity check:</strong> θx and θy must satisfy cos²θx + cos²θy ≤ 1. If not, the row is highlighted and values are not computed.
-      <br/>
-      <strong>Reminder:</strong> Direction angles are typically between 0° and 180°.
+      <strong>Tip:</strong> Direction angles are typically between 0° and 180°.
+      If a row is invalid, it is highlighted and excluded from the resultant summation.
     </div>
 
-    <!-- OUTPUT TABLES BELOW -->
+    <!-- OUTPUTS BELOW -->
     <div class="grid2">
       <div>
         <div class="muted"><strong>Computed components (per vector)</strong></div>
@@ -90,7 +93,7 @@
       </div>
 
       <div>
-        <div class="muted"><strong>Resultant (sum of all vectors)</strong></div>
+        <div class="muted"><strong>Resultant (sum of valid vectors)</strong></div>
         <div class="summary">
           <div><strong>Rx</strong> = <span class="kpi" id="Rx">—</span></div>
           <div><strong>Ry</strong> = <span class="kpi" id="Ry">—</span></div>
@@ -105,7 +108,7 @@
         <div class="rvec" id="RvecBelow"><strong>R = —</strong></div>
 
         <div class="note">
-          θRx = acos(Rx/|R|), etc. If |R| = 0, direction angles are N/A.
+          Resultant direction angles computed as θRx = acos(Rx/|R|), etc. If |R| = 0, angles are N/A.
         </div>
       </div>
     </div>
@@ -132,8 +135,8 @@
   const RvecBelowEl = document.getElementById("RvecBelow");
 
   // ---- Helpers
-  const EPS0 = 5e-10;   // snap tiny values to 0
-  const TOLQ = 1e-12;   // tolerance for q = 1 - cx^2 - cy^2
+  const EPS0 = 5e-10;      // snap tiny values to 0
+  const TOL_SUM = 0.02;    // tolerance on (cos^2 sum) around 1.0 (e.g., 0.02 = ±0.02)
 
   const deg2rad = (d) => d * Math.PI / 180;
   const rad2deg = (r) => r * 180 / Math.PI;
@@ -159,76 +162,6 @@
     return `(${v.toFixed(1)})`;
   };
 
-  function relabel() {
-    [...inputBody.querySelectorAll("tr")].forEach((tr, i) => {
-      tr._label = `F${i+1}`;
-      tr.querySelector(".lbl").textContent = tr._label;
-    });
-    rebuildCompTable(); // keep component table aligned
-  }
-
-  function makeRow(mag=100, thx=60, thy=60, signZ="+") {
-    const tr = document.createElement("tr");
-
-    tr.innerHTML = `
-      <td class="lbl"></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td></td>
-      <td class="thz">—</td>
-      <td class="rowbtn"></td>
-    `;
-
-    const tdMag = tr.children[1];
-    const inMag = document.createElement("input");
-    inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
-    tdMag.appendChild(inMag);
-
-    const tdThx = tr.children[2];
-    const inThx = document.createElement("input");
-    inThx.type = "number"; inThx.step = "any"; inThx.value = thx;
-    tdThx.appendChild(inThx);
-
-    const tdThy = tr.children[3];
-    const inThy = document.createElement("input");
-    inThy.type = "number"; inThy.step = "any"; inThy.value = thy;
-    tdThy.appendChild(inThy);
-
-    const tdSign = tr.children[4];
-    const sel = document.createElement("select");
-    sel.innerHTML = `<option value="+">+</option><option value="-">−</option>`;
-    sel.value = signZ;
-    tdSign.appendChild(sel);
-
-    const tdThz = tr.querySelector(".thz");
-
-    const tdDel = tr.children[6];
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "×";
-    tdDel.appendChild(delBtn);
-
-    tr._mag = inMag;
-    tr._thx = inThx;
-    tr._thy = inThy;
-    tr._signZ = sel;
-    tr._thzCell = tdThz;
-
-    function onChange(){ update(); }
-    inMag.addEventListener("input", onChange);
-    inThx.addEventListener("input", onChange);
-    inThy.addEventListener("input", onChange);
-    sel.addEventListener("change", onChange);
-
-    delBtn.addEventListener("click", () => {
-      tr.remove();
-      relabel();
-      update();
-    });
-
-    inputBody.appendChild(tr);
-  }
-
   function rebuildCompTable() {
     compBody.innerHTML = "";
     [...inputBody.querySelectorAll("tr")].forEach(tr => {
@@ -247,9 +180,84 @@
     });
   }
 
-  function rowSetInvalid(tr, msg="Invalid") {
+  function relabel() {
+    [...inputBody.querySelectorAll("tr")].forEach((tr, i) => {
+      tr._label = `F${i+1}`;
+      tr.querySelector(".lbl").textContent = tr._label;
+    });
+    rebuildCompTable();
+  }
+
+  function makeRow(mag=100, thx=60, thy=60, thz=60) {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td class="lbl"></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td class="validCell validMark">—</td>
+      <td class="rowbtn"></td>
+    `;
+
+    const tdMag = tr.children[1];
+    const inMag = document.createElement("input");
+    inMag.type = "number"; inMag.step = "any"; inMag.value = mag;
+    tdMag.appendChild(inMag);
+
+    const tdThx = tr.children[2];
+    const inThx = document.createElement("input");
+    inThx.type = "number"; inThx.step = "any"; inThx.value = thx;
+    tdThx.appendChild(inThx);
+
+    const tdThy = tr.children[3];
+    const inThy = document.createElement("input");
+    inThy.type = "number"; inThy.step = "any"; inThy.value = thy;
+    tdThy.appendChild(inThy);
+
+    const tdThz = tr.children[4];
+    const inThz = document.createElement("input");
+    inThz.type = "number"; inThz.step = "any"; inThz.value = thz;
+    tdThz.appendChild(inThz);
+
+    const validMark = tr.querySelector(".validMark");
+
+    const tdDel = tr.children[6];
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "×";
+    tdDel.appendChild(delBtn);
+
+    tr._mag = inMag;
+    tr._thx = inThx;
+    tr._thy = inThy;
+    tr._thz = inThz;
+    tr._validCell = validMark;
+
+    function onChange(){ update(); }
+    inMag.addEventListener("input", onChange);
+    inThx.addEventListener("input", onChange);
+    inThy.addEventListener("input", onChange);
+    inThz.addEventListener("input", onChange);
+
+    delBtn.addEventListener("click", () => {
+      tr.remove();
+      relabel();
+      update();
+    });
+
+    inputBody.appendChild(tr);
+  }
+
+  function setValidMark(tr, ok) {
+    tr._validCell.textContent = ok ? "✔" : "✖";
+    tr._validCell.classList.toggle("ok", ok);
+    tr._validCell.classList.toggle("bad", !ok);
+  }
+
+  function rowSetInvalid(tr) {
     tr.classList.add("invalid");
-    tr._thzCell.textContent = msg;
+    setValidMark(tr, false);
     if (tr._fxCell) tr._fxCell.textContent = "—";
     if (tr._fyCell) tr._fyCell.textContent = "—";
     if (tr._fzCell) tr._fzCell.textContent = "—";
@@ -257,40 +265,37 @@
 
   function rowSetValid(tr) {
     tr.classList.remove("invalid");
+    setValidMark(tr, true);
   }
 
   function computeRow(tr) {
     const F   = parseFloat(tr._mag.value);
     const thx = parseFloat(tr._thx.value);
     const thy = parseFloat(tr._thy.value);
-    const sgn = tr._signZ.value === "-" ? -1 : +1;
+    const thz = parseFloat(tr._thz.value);
 
-    if (!Number.isFinite(F) || !Number.isFinite(thx) || !Number.isFinite(thy) || F < 0) {
-      rowSetInvalid(tr, "Enter valid inputs");
+    if (!Number.isFinite(F) || !Number.isFinite(thx) || !Number.isFinite(thy) || !Number.isFinite(thz) || F < 0) {
+      rowSetInvalid(tr);
       return { ok:false };
     }
 
     const cx = Math.cos(deg2rad(thx));
     const cy = Math.cos(deg2rad(thy));
-    let q = 1 - cx*cx - cy*cy;
+    const cz = Math.cos(deg2rad(thz));
 
-    if (q < -TOLQ) {
-      rowSetInvalid(tr, "Invalid: cos²θx+cos²θy>1");
+    const sum = cx*cx + cy*cy + cz*cz;
+    const ok = Math.abs(sum - 1) <= TOL_SUM;
+
+    if (!ok) {
+      rowSetInvalid(tr);
       return { ok:false };
     }
-
-    q = Math.max(0, q);
-    let cz = sgn * Math.sqrt(q);
-    if (Math.abs(cz) < EPS0) cz = 0;
-
-    const thz = rad2deg(Math.acos(clamp01(cz)));
 
     const fx = F * cx;
     const fy = F * cy;
     const fz = F * cz;
 
     rowSetValid(tr);
-    tr._thzCell.textContent = fmtDeg(thz);
     tr._fxCell.textContent = fmtSigned(fx);
     tr._fyCell.textContent = fmtSigned(fy);
     tr._fzCell.textContent = fmtSigned(fz);
@@ -347,18 +352,17 @@
 
   function reset() {
     inputBody.innerHTML = "";
-    makeRow(350, 90, 50, "+");
-    makeRow(100, 45, 60, "-");
-    makeRow(250, 60, 135, "+");
+    // Sample rows (valid examples)
+    makeRow(750, 60, 60, 60);
+    makeRow(500, 120, 80, 90);
+    makeRow(300, 70, 110, 100);
     relabel();
-    rebuildCompTable();
     update();
   }
 
   addBtn.addEventListener("click", () => {
-    makeRow(100, 60, 60, "+");
+    makeRow(100, 60, 60, 60);
     relabel();
-    rebuildCompTable();
     update();
   });
 
