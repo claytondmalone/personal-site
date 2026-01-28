@@ -1,6 +1,14 @@
 <!doctype html>
 <html lang="en">
 <head>
+  <script type="importmap">
+{
+  "imports": {
+    "three": "/assets/js/three/three.module.js"
+  }
+}
+</script>
+
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>3D Vector Resultant Calculator</title>
@@ -448,9 +456,10 @@
 
   try {
     // Use dynamic imports so a failure doesn't break the whole page.
-    const THREE = await import("https://unpkg.com/three@0.161.0/build/three.module.js");
-    const modControls = await import("https://unpkg.com/three@0.161.0/examples/jsm/controls/OrbitControls.js");
+    const THREE = await import("three"); // resolved by import map
+    const modControls = await import("/assets/js/three/OrbitControls.js");
     const OrbitControls = modControls.OrbitControls;
+
 
     setStatus("3D plot ready.");
 
