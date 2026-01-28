@@ -165,6 +165,11 @@
       <div class="plotLegend">
         <span><span class="swatch swGray"></span> Gray: individual force vectors (from origin)</span>
         <span><span class="swatch swRed"></span> Red: resultant vector (from origin)</span>
+      
+        <button type="button" id="viewUpX" style="padding:4px 8px;font-size:12px;">Up = +X</button>
+        <button type="button" id="viewUpY" style="padding:4px 8px;font-size:12px;">Up = +Y</button>
+        <button type="button" id="viewUpZ" style="padding:4px 8px;font-size:12px;">Up = +Z</button>
+      
         <span class="muted">Drag to rotate • Scroll to zoom</span>
       </div>
     </div>
@@ -478,6 +483,37 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.target.set(0, 0, 0);
+
+    const btnUpX = document.getElementById("viewUpX");
+const btnUpY = document.getElementById("viewUpY");
+const btnUpZ = document.getElementById("viewUpZ");
+
+function snapView(upAxis /* THREE.Vector3 */) {
+  // Keep current zoom-ish distance if possible
+  const dist = camera.position.distanceTo(controls.target) || 10;
+
+  // Set the screen "vertical" axis
+  camera.up.copy(upAxis);
+
+  // Pick a view direction that isn't parallel to the up axis
+  // (so OrbitControls doesn't get into a gimbal-y singularity)
+  let viewDir = new THREE.Vector3(1, 1, 1).normalize();
+  if (Math.abs(viewDir.dot(upAxis)) > 0.95) {
+    viewDir = new THREE.Vector3(1, 0.2, 0.6).normalize();
+  }
+
+  // Position camera at target + dist * viewDir
+  const pos = controls.target.clone().add(viewDir.multiplyScalar(dist));
+  camera.position.copy(pos);
+
+  camera.updateProjectionMatrix();
+  controls.update();
+}
+
+btnUpX?.addEventListener("click", () => snapView(new THREE.Vector3(1, 0, 0)));
+btnUpY?.addEventListener("click", () => snapView(new THREE.Vector3(0, 1, 0)));
+btnUpZ?.addEventListener("click", () => snapView(new THREE.Vector3(0, 0, 1)));
+
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const dir = new THREE.DirectionalLight(0xffffff, 0.6);
